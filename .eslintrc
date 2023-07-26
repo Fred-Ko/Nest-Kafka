@@ -1,0 +1,48 @@
+﻿{
+  "parser": "@typescript-eslint/parser",
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:prettier/recommended"
+  ],
+  "plugins": ["@typescript-eslint", "import", "prettier", "unused-imports"],
+  "rules": {
+    "@typescript-eslint/no-unused-vars": ["error"],
+    "unused-imports/no-unused-imports-ts": "error",
+    "prefer-const": "error",
+    "curly": ["error", "all"],
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "no-warning-comments": [
+      "warn",
+      { "terms": ["TODO", "FIXME", "XXX", "BUG", "NOTE"], "location": "anywhere" }
+    ],
+    "sort-imports": [
+      "error",
+      {
+        "ignoreCase": true,
+        "ignoreDeclarationSort": true,
+        "ignoreMemberSort": true,
+        "allowSeparatedGroups": true,
+        "memberSyntaxSortOrder": ["none", "all", "multiple", "single"]
+      }
+    ],
+    "prettier/prettier": "error",
+    "@typescript-eslint/explicit-function-return-type": "off",
+    "@typescript-eslint/explicit-module-boundary-types": "off",
+    "@typescript-eslint/triple-slash-reference": "off",
+    "@typescript-eslint/no-non-null-assertion": "off",
+    "@typescript-eslint/no-use-before-define": "off",
+    "@typescript-eslint/naming-convention": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-namespace": "off",
+
+    // 추가할 내용 시작
+    "@typescript-eslint/no-var-requires": "off",
+    "@typescript-eslint/no-empty-function": "off",
+    "@typescript-eslint/ban-types": "off",
+    "@typescript-eslint/explicit-member-accessibility": "off",
+    "@typescript-eslint/ban-ts-comment": "off",
+    "unused-imports/no-unused-vars-ts": "warn"
+    // 추가할 내용 끝
+  }
+}
