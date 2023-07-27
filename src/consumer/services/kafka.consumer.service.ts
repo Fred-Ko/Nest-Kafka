@@ -1,73 +1,90 @@
-﻿import { KafkaClusterSymbol } from '@src/common';
-import {
-  ConsumerServiceInterface,
-  IKafkaBatchConsumer,
-  IKafkaConsumer,
-  KafkaConsumerBatchConsumeOptions,
-  KafkaConsumerConsumeOptions,
-} from '@src/consumer';
-import { Kafka, KafkaConfig } from 'kafkajs';
+﻿import { SetMetadata } from '@nestjs/common';
+import { KAFKA_CONSUMER_SERVICE, KafkaClusterSymbol } from '@src/common';
+import { IKafkaConsumer, IKafkaConsumerService, KafkaConsumer, KafkaConsumerConsumeOptions } from '@src/consumer';
+import { ConsumerConfig, ConsumerSubscribeTopics, Kafka, KafkaConfig } from 'kafkajs';
 
-export class KafkaConsumerService implements ConsumerServiceInterface {
-  private kafkaClient: Kafka;
-  private kafkaClusterSymbol: KafkaClusterSymbol;
+@SetMetadata(KAFKA_CONSUMER_SERVICE, KAFKA_CONSUMER_SERVICE)
+export class KafkaConsumerService implements IKafkaConsumerService {
+    private kafkaClient: Kafka;
+    private kafkaClusterSymbol: KafkaClusterSymbol;
 
-  private isInitialized: boolean;
-  private isConsuming: boolean;
-  private isConnecting: boolean;
+    private topicList: string[] = [];
+    private consumers: IKafkaConsumer[] = [];
+    private duplicateCheckTable: Set<string> = new Set<string>();
 
-  private kafkaConsumers: IKafkaConsumer[];
-  private kafkaBatchConsumers: IKafkaBatchConsumer[];
+    private isInitialized: boolean;
 
-  private duplicateCheckTable: Set<string>; // topic, groupId 쌍이 중복되는지 체크하기 위한 테이블
+    async init(symbol: KafkaClusterSymbol, config: KafkaConfig): Promise<void> {
+        this.kafkaClusterSymbol = symbol;
+        this.kafkaClient = new Kafka(config);
 
-  async consume(options: KafkaConsumerConsumeOptions): Promise<void>;
-  async consume(options: KafkaConsumerBatchConsumeOptions): Promise<void>;
+        this.isInitialized = true;
+        this.topicList = await this.kafkaClient.admin().listTopics();
+    }
 
-  async init(symbol: KafkaClusterSymbol, config: KafkaConfig): Promise<void> {}
-  async consume(options: KafkaConsumerConsumeOptions): Promise<void> {}
-  async consume(options: KafkaConsumerBatchConsumeOptions): Promise<void> {}
-  async connect(): Promise<void> {}
-  async disconnect(): Promise<void> {}
-  async onApplicationShutdown(signal?: string | undefined) {}
-  async onApplicationBootstrap() {}
-
-  private async testConnect() {}
-  private async registerConsumerWithDuplicateCheck(
-    topic: string | RegExp,
-    groupId: string,
-    consumer: IKafkaConsumer | IKafkaBatchConsumer,
-  ): Promise<void> {
-    // Topic is a RegExp
-    if (topic instanceof RegExp) {
-      // kafkaClient를 이용하여 현재 등록된 topic들 중 해당 RegExp에 매칭되는 topic들을 찾는다.
-      const topics = await this.kafkaClient.admin().listTopics();
-      const matchedTopics = topics.filter((t) => topic.test(t));
-
-      if (matchedTopics.length > 0) {
-        for (let matchedTopic of matchedTopics) {
-          const matchedKey = `${matchedTopic}|${groupId}`;
-          if (this.duplicateCheckTable.has(matchedKey)) {
-            throw new Error(
-              `The topic '${matchedTopic}' with group ID '${groupId}' is already in use.`,
-            );
-          }
-          this.duplicateCheckTable.add(matchedKey);
+    async consume(options: KafkaConsumerConsumeOptions): Promise<void> {
+        if (!this.isInitialized) {
+            throw new Error('Kafka Consumer Service is not initialized');
         }
 
-        if (checkBatchConsumer(consumer)) this.kafkaBatchConsumers.push(consumer);
-      }
+        const { symbol, topics, config, consumerRunConfig } = options;
+
+        if (this.kafkaClusterSymbol !== symbol) {
+            throw new Error('Kafka Broker Symbol is not matched');
+        }
+
+        const consumer = await this.getOrCreateConsumer(topics, config);
+        await consumer.onMessage(consumerRunConfig);
     }
 
-    // Topic is a string
-    if (typeof topic === 'string') {
-      const matchedKey = `${topic}|${groupId}`;
-      if (this.duplicateCheckTable.has(matchedKey)) {
-        throw new Error(`The topic '${topic}' with group ID '${groupId}' is already in use.`);
-      }
+    private async getOrCreateConsumer(topics: ConsumerSubscribeTopics, config: ConsumerConfig): Promise<IKafkaConsumer> {
+        const consumerGroupId = config.groupId;
+        const matchedTopics = await this.checkDuplicateTopic(topics, consumerGroupId);
 
-      this.duplicateCheckTable.add(matchedKey);
-      if (checkConsumer(consumer)) this.kafkaConsumers.push(consumer);
+        const consumer = new KafkaConsumer();
+        await consumer.init(this.kafkaClient, { topics: matchedTopics, fromBeginning: topics.fromBeginning ?? false }, config);
+        return consumer;
     }
-  }
+
+    private async checkDuplicateTopic(consumerSubscribeTopics: ConsumerSubscribeTopics, consumerGroupId: string): Promise<string[]> {
+        if (this.topicList.length === 0) throw new Error('TopicList is empty');
+        if (this.isInitialized === false) throw new Error('Kafka Consumer Service is not initialized');
+
+        const returnTopics: string[] = [];
+
+        // topic,consumerGroupId pair가 유니크해야한다.
+        const { topics } = consumerSubscribeTopics;
+
+        topics.forEach((topic) => {
+            if (typeof topic === 'string') {
+                const matchedTopic = topic;
+                const duplicateKey = `${matchedTopic}|${consumerGroupId}`;
+                if (this.duplicateCheckTable.has(duplicateKey)) throw new Error('Duplicate Topic & Consumer Group Id Pair');
+                this.duplicateCheckTable.add(duplicateKey);
+                returnTopics.push(matchedTopic);
+            }
+
+            if (topic instanceof RegExp) {
+                const matchedTopics = this.topicList.filter((topicName) => topic.test(topicName));
+                matchedTopics.forEach((matchedTopic) => {
+                    const duplicateKey = `${matchedTopic}|${consumerGroupId}`;
+                    if (this.duplicateCheckTable.has(duplicateKey)) throw new Error('Duplicate Topic & Consumer Group Id Pair');
+                    this.duplicateCheckTable.add(duplicateKey);
+                    returnTopics.push(matchedTopic);
+                });
+            }
+
+            throw new Error('Invalid ConsumerSubscribeTopics');
+        });
+
+        return returnTopics;
+    }
+
+    async onApplicationShutdown(signal?: string | undefined) {
+        await Promise.all(this.consumers.map((consumer) => consumer.disconnect()));
+    }
+
+    async onApplicationBootstrap() {
+        await Promise.all(this.consumers.map((consumer) => consumer.connect()));
+    }
 }

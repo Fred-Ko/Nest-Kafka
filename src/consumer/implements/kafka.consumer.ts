@@ -1,57 +1,33 @@
 ﻿import { IKafkaConsumer } from '@src/consumer';
-import {
-  Consumer,
-  ConsumerConfig,
-  ConsumerSubscribeTopics,
-  EachMessagePayload,
-  Kafka,
-  Message,
-} from 'kafkajs';
+import { Consumer, ConsumerConfig, ConsumerRunConfig, ConsumerSubscribeTopics, Kafka } from 'kafkajs';
 
 export class KafkaConsumer implements IKafkaConsumer {
-  private consumer: Consumer;
-  private topics: ConsumerSubscribeTopics;
+    private consumer: Consumer;
+    private topics: ConsumerSubscribeTopics;
+    private isInitialized: boolean;
 
-  async init(kafka: Kafka, topics: ConsumerSubscribeTopics, config: ConsumerConfig): Promise<void> {
-    this.consumer = kafka.consumer(config);
-    this.topics = topics;
+    async init(kafka: Kafka, topics: ConsumerSubscribeTopics, config: ConsumerConfig): Promise<void> {
+        this.consumer = kafka.consumer(config);
+        this.topics = topics;
+        this.isInitialized = false;
+    }
 
-    await this.connect();
-    await this.consumer.subscribe(topics);
-  }
-
-  async connect(): Promise<void> {
-    await this.consumer.connect();
-  }
-
-  async disconnect(): Promise<void> {
-    await this.consumer.disconnect();
-  }
-
-  async consumeEachMessage(
-    onMessage: (payload: EachMessagePayload) => Promise<void>,
-    errorCallback?: (message: Message, error: any) => Promise<void>,
-  ): Promise<void> {
-    await this.consumer.run({
-      eachMessage: async (payload) => {
+    async connect(): Promise<void> {
         try {
-          await onMessage(payload);
+            await this.consumer.connect();
+            await this.consumer.subscribe(this.topics);
+            this.isInitialized = true;
         } catch (error) {
-          if (errorCallback) {
-            await errorCallback(payload.message, error);
-          } else {
-            throw error;
-          }
+            throw new Error('Kafka Consumer Connection Failed');
         }
-      },
-    });
-  }
+    }
 
-  onApplicationShutdown(signal?: string | undefined) {
-    // Implement the onApplicationShutdown logic here
-  }
+    async disconnect(): Promise<void> {
+        await this.consumer.disconnect();
+        this.isInitialized = false;
+    }
 
-  onApplicationBootstrap() {
-    // Implement the onApplicationBootstrap logic here
-  }
+    async onMessage(consumerRunConfig: ConsumerRunConfig): Promise<void> {
+        await this.consumer.run(consumerRunConfig);
+    }
 }
